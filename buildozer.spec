@@ -7,8 +7,7 @@ source.dir = .
 source.include_exts = py,png,jpg,kv,atlas
 version = 1.0.0
 
-requirements = python3,kivy,yt-dlp,urllib3,certifi,charset-normalizer,idna
-
+requirements = python3==3.11.5,hostpython3==3.11.5,kivy,yt-dlp,urllib3,certifi,charset-normalizer,idna
 orientation = portrait
 android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE
 
