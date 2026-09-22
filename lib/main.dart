@@ -48,12 +48,6 @@ class _HomeScreenState extends State<HomeScreen> {
   String _videoTitle = "No video loaded";
   String? _savedFilePath;
 
-  String _selectedAudioQuality = "320 kbps (HQ)";
-  String _selectedVideoQuality = "720p (HD)";
-
-  final List<String> _audioQualities = ["320 kbps (HQ)", "192 kbps (Standard)", "128 kbps (Fast)"];
-  final List<String> _videoQualities = ["720p (HD)", "480p", "360p"];
-
   Future<void> _pasteFromClipboard() async {
     ClipboardData? data = await Clipboard.getData(Clipboard.kTextPlain);
     if (data?.text != null) {
@@ -69,13 +63,13 @@ class _HomeScreenState extends State<HomeScreen> {
     if (url.isEmpty) return;
 
     try {
-      setState(() => _statusText = "Analyzing YouTube video...");
+      setState(() => _statusText = "Fetching video details...");
       var video = await _yt.videos.get(url);
       setState(() {
         _videoTitle = video.title;
         _statusText = "Channel: ${video.author} • ${video.duration?.inMinutes ?? 0} mins";
       });
-    } catch (e) {
+    } catch (_) {
       setState(() => _statusText = "Ready to download");
     }
   }
@@ -92,19 +86,19 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       _isDownloading = true;
       _progress = 0.0;
-      _statusText = "Connecting via high-speed client...";
+      _statusText = "Connecting to media stream...";
       _savedFilePath = null;
     });
 
     try {
       var video = await _yt.videos.get(url);
       
-      // Bypass YouTube throttling using official AndroidVR and iOS client tokens
+      // Request manifest with unblocked clients
       var manifest = await _yt.videos.streamsClient.getManifest(
         url,
         ytClients: [
-          YoutubeApiClient.androidVr,
-          YoutubeApiClient.ios,
+          YoutubeApiClient.safari,
+          YoutubeApiClient.tvEmbedded,
         ],
       );
 
@@ -112,35 +106,25 @@ class _HomeScreenState extends State<HomeScreen> {
       String extension;
 
       if (_isAudio) {
+        // High quality audio stream
         streamInfo = manifest.audioOnly.withHighestBitrate();
         extension = "mp3";
       } else {
-        if (_selectedVideoQuality == "720p (HD)") {
-          streamInfo = manifest.muxed.firstWhere(
-            (s) => s.videoQualityLabel.contains('720'),
-            orElse: () => manifest.muxed.withHighestBitrate(),
-          );
-        } else if (_selectedVideoQuality == "480p") {
-          streamInfo = manifest.muxed.firstWhere(
-            (s) => s.videoQualityLabel.contains('480'),
-            orElse: () => manifest.muxed.withHighestBitrate(),
-          );
+        // Muxed video (contains both video and audio without 403 errors)
+        if (manifest.muxed.isNotEmpty) {
+          streamInfo = manifest.muxed.withHighestBitrate();
         } else {
-          streamInfo = manifest.muxed.firstWhere(
-            (s) => s.videoQualityLabel.contains('360'),
-            orElse: () => manifest.muxed.withHighestBitrate(),
-          );
+          streamInfo = manifest.videoOnly.withHighestBitrate();
         }
         extension = "mp4";
       }
 
-      // Safe cross-platform save path
       Directory? baseDir = await getExternalStorageDirectory();
       baseDir ??= await getApplicationDocumentsDirectory();
 
       String cleanTitle = video.title.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
-      if (cleanTitle.length > 35) {
-        cleanTitle = cleanTitle.substring(0, 35);
+      if (cleanTitle.length > 30) {
+        cleanTitle = cleanTitle.substring(0, 30);
       }
 
       File file = File('${baseDir.path}/$cleanTitle.$extension');
@@ -164,7 +148,7 @@ class _HomeScreenState extends State<HomeScreen> {
       await fileStream.flush();
       await fileStream.close();
 
-      // Try copying to standard public Downloads folder
+      // Copy to public Downloads folder if accessible
       try {
         Directory publicDownloads = Directory('/storage/emulated/0/Download');
         if (await publicDownloads.exists()) {
@@ -175,7 +159,7 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         _isDownloading = false;
         _savedFilePath = file.path;
-        _statusText = "Done! Ready to play.";
+        _statusText = "Download Complete!";
       });
     } catch (e) {
       setState(() {
@@ -217,7 +201,6 @@ class _HomeScreenState extends State<HomeScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // URL Input Card
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -256,8 +239,6 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
             const SizedBox(height: 16),
-
-            // Metadata Card
             Container(
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
@@ -275,8 +256,6 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
             const SizedBox(height: 16),
-
-            // Format Selection
             Row(
               children: [
                 Expanded(
@@ -306,55 +285,11 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ],
             ),
-            const SizedBox(height: 14),
-
-            // Quality Dropdown
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-              decoration: BoxDecoration(
-                color: const Color(0xFF14171F),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: const Color(0xFF282F3E)),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    _isAudio ? "Audio Bitrate:" : "Video Quality:",
-                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey),
-                  ),
-                  DropdownButton<String>(
-                    value: _isAudio ? _selectedAudioQuality : _selectedVideoQuality,
-                    dropdownColor: const Color(0xFF1D222D),
-                    underline: const SizedBox(),
-                    items: (_isAudio ? _audioQualities : _videoQualities).map((String q) {
-                      return DropdownMenuItem<String>(
-                        value: q,
-                        child: Text(q, style: const TextStyle(fontSize: 12, color: Colors.white)),
-                      );
-                    }).toList(),
-                    onChanged: (val) {
-                      if (val != null) {
-                        setState(() {
-                          if (_isAudio) {
-                            _selectedAudioQuality = val;
-                          } else {
-                            _selectedVideoQuality = val;
-                          }
-                        });
-                      }
-                    },
-                  ),
-                ],
-              ),
-            ),
             const SizedBox(height: 20),
-
             if (_isDownloading) ...[
               LinearProgressIndicator(value: _progress > 0 ? _progress : null, color: const Color(0xFF00F076), backgroundColor: const Color(0xFF1D222D)),
               const SizedBox(height: 14),
             ],
-
             ElevatedButton(
               onPressed: _isDownloading ? null : _startDownload,
               style: ElevatedButton.styleFrom(
@@ -368,8 +303,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
               ),
             ),
-
-            // Success Card with PLAY and SHARE
             if (_savedFilePath != null) ...[
               const SizedBox(height: 20),
               Container(
@@ -385,7 +318,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       children: [
                         Icon(Icons.check_circle, color: Color(0xFF00F076)),
                         SizedBox(width: 8),
-                        Text("Download Complete!", style: TextStyle(color: Color(0xFF00F076), fontWeight: FontWeight.bold)),
+                        Text("Download Ready!", style: TextStyle(color: Color(0xFF00F076), fontWeight: FontWeight.bold)),
                       ],
                     ),
                     const SizedBox(height: 14),
