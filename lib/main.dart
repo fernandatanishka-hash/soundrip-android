@@ -2,6 +2,9 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:open_filex/open_filex.dart';
+import 'package:share_plus/share_plus.dart';
 
 void main() {
   runApp(const SoundRipApp());
@@ -41,16 +44,15 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isAudio = true;
   bool _isDownloading = false;
   double _progress = 0.0;
-  String _statusText = "Ready. Paste a link to begin.";
+  String _statusText = "Ready. Paste a YouTube link to begin.";
   String _videoTitle = "No video loaded";
-  String _savedFilePath = "";
+  String? _savedFilePath;
 
-  // Quality settings
   String _selectedAudioQuality = "320 kbps (HQ)";
   String _selectedVideoQuality = "720p (HD)";
 
   final List<String> _audioQualities = ["320 kbps (HQ)", "192 kbps (Standard)", "128 kbps (Fast)"];
-  final List<String> _videoQualities = ["1080p (Full HD)", "720p (HD)", "480p", "360p"];
+  final List<String> _videoQualities = ["720p (HD)", "480p", "360p"];
 
   Future<void> _pasteFromClipboard() async {
     ClipboardData? data = await Clipboard.getData(Clipboard.kTextPlain);
@@ -67,7 +69,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (url.isEmpty) return;
 
     try {
-      setState(() => _statusText = "Fetching stream details...");
+      setState(() => _statusText = "Fetching video details...");
       var video = await _yt.videos.get(url);
       setState(() {
         _videoTitle = video.title;
@@ -75,31 +77,6 @@ class _HomeScreenState extends State<HomeScreen> {
       });
     } catch (_) {
       setState(() => _statusText = "Ready to download");
-    }
-  }
-
-  Future<Directory> _getDownloadDirectory() async {
-    // Attempt standard Android public Downloads folder
-    List<String> paths = [
-      '/storage/emulated/0/Download',
-      '/sdcard/Download',
-      '/storage/emulated/0/Music',
-    ];
-
-    for (String p in paths) {
-      Directory d = Directory(p);
-      if (await d.exists()) {
-        return d;
-      }
-    }
-
-    // Fallback: create Download directory
-    Directory fallback = Directory('/storage/emulated/0/Download');
-    try {
-      await fallback.create(recursive: true);
-      return fallback;
-    } catch (_) {
-      return Directory.systemTemp;
     }
   }
 
@@ -116,7 +93,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _isDownloading = true;
       _progress = 0.0;
       _statusText = "Connecting to high-speed stream...";
-      _savedFilePath = "";
+      _savedFilePath = null;
     });
 
     try {
@@ -130,21 +107,39 @@ class _HomeScreenState extends State<HomeScreen> {
         streamInfo = manifest.audioOnly.withHighestBitrate();
         extension = "mp3";
       } else {
-        streamInfo = manifest.muxed.withHighestBitrate();
+        // Choose best matching video quality
+        if (_selectedVideoQuality == "720p (HD)") {
+          streamInfo = manifest.muxed.firstWhere(
+            (s) => s.videoQualityLabel.contains('720'),
+            orElse: () => manifest.muxed.withHighestBitrate(),
+          );
+        } else if (_selectedVideoQuality == "480p") {
+          streamInfo = manifest.muxed.firstWhere(
+            (s) => s.videoQualityLabel.contains('480'),
+            orElse: () => manifest.muxed.withHighestBitrate(),
+          );
+        } else {
+          streamInfo = manifest.muxed.firstWhere(
+            (s) => s.videoQualityLabel.contains('360'),
+            orElse: () => manifest.muxed.withHighestBitrate(),
+          );
+        }
         extension = "mp4";
       }
 
-      var stream = _yt.videos.streamsClient.get(streamInfo);
-      Directory saveDir = await _getDownloadDirectory();
+      // Safe saving directory (works on all Android 10, 11, 12, 13, 14)
+      Directory? baseDir = await getExternalStorageDirectory();
+      baseDir ??= await getApplicationDocumentsDirectory();
 
-      String cleanTitle = video.title.replaceAll(RegExp(r'[\\/:*?"<>|]'), '');
-      if (cleanTitle.length > 50) {
-        cleanTitle = cleanTitle.substring(0, 50);
+      String cleanTitle = video.title.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+      if (cleanTitle.length > 40) {
+        cleanTitle = cleanTitle.substring(0, 40);
       }
 
-      var file = File('${saveDir.path}/$cleanTitle.$extension');
+      File file = File('${baseDir.path}/$cleanTitle.$extension');
       var fileStream = file.openWrite();
 
+      var stream = _yt.videos.streamsClient.get(streamInfo);
       int totalBytes = streamInfo.size.totalBytes;
       int receivedBytes = 0;
 
@@ -160,29 +155,36 @@ class _HomeScreenState extends State<HomeScreen> {
       await fileStream.flush();
       await fileStream.close();
 
+      // Also copy to public Downloads if permitted
+      try {
+        Directory publicDownloads = Directory('/storage/emulated/0/Download');
+        if (await publicDownloads.exists()) {
+          await file.copy('${publicDownloads.path}/$cleanTitle.$extension');
+        }
+      } catch (_) {}
+
       setState(() {
         _isDownloading = false;
         _savedFilePath = file.path;
-        _statusText = "Saved to: ${file.path}";
+        _statusText = "Download Complete!";
       });
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: const Color(0xFF00F076),
-            duration: const Duration(seconds: 4),
-            content: Text(
-              "Saved to Downloads:\n$cleanTitle.$extension", 
-              style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)
-            ),
-          ),
-        );
-      }
     } catch (e) {
       setState(() {
         _isDownloading = false;
         _statusText = "Error: $e";
       });
+    }
+  }
+
+  void _openFile() {
+    if (_savedFilePath != null) {
+      OpenFilex.open(_savedFilePath!);
+    }
+  }
+
+  void _shareFile() {
+    if (_savedFilePath != null) {
+      Share.shareXFiles([XFile(_savedFilePath!)], text: "Downloaded with SoundRip Studio");
     }
   }
 
@@ -206,7 +208,7 @@ class _HomeScreenState extends State<HomeScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // URL Box
+            // URL Input Card
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -225,7 +227,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         child: TextField(
                           controller: _urlController,
                           decoration: const InputDecoration(
-                            hintText: "Paste YouTube link here...",
+                            hintText: "Paste YouTube link...",
                             filled: true,
                             fillColor: Color(0xFF1D222D),
                             border: InputBorder.none,
@@ -236,10 +238,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       const SizedBox(width: 8),
                       ElevatedButton(
                         onPressed: _pasteFromClipboard,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF2A3345),
-                          foregroundColor: Colors.white,
-                        ),
+                        style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2A3345), foregroundColor: Colors.white),
                         child: const Text("Paste"),
                       ),
                     ],
@@ -249,7 +248,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             const SizedBox(height: 16),
 
-            // Metadata Box
+            // Metadata Card
             Container(
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
@@ -268,7 +267,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             const SizedBox(height: 16),
 
-            // Format Switcher (MP3 vs MP4)
+            // Format Selection
             Row(
               children: [
                 Expanded(
@@ -300,7 +299,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             const SizedBox(height: 14),
 
-            // Quality Dropdown Row
+            // Quality Dropdown
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
               decoration: BoxDecoration(
@@ -312,8 +311,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    _isAudio ? "Audio Bitrate:" : "Video Quality:", 
-                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey)
+                    _isAudio ? "Audio Bitrate:" : "Video Quality:",
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey),
                   ),
                   DropdownButton<String>(
                     value: _isAudio ? _selectedAudioQuality : _selectedVideoQuality,
@@ -340,16 +339,13 @@ class _HomeScreenState extends State<HomeScreen> {
                 ],
               ),
             ),
-
             const SizedBox(height: 20),
 
-            // Progress bar
             if (_isDownloading) ...[
               LinearProgressIndicator(value: _progress, color: const Color(0xFF00F076), backgroundColor: const Color(0xFF1D222D)),
               const SizedBox(height: 14),
             ],
 
-            // Action Button
             ElevatedButton(
               onPressed: _isDownloading ? null : _startDownload,
               style: ElevatedButton.styleFrom(
@@ -364,24 +360,54 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
 
-            if (_savedFilePath.isNotEmpty) ...[
-              const SizedBox(height: 16),
+            // Success Action Buttons (Play & Share)
+            if (_savedFilePath != null) ...[
+              const SizedBox(height: 20),
               Container(
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
                   color: const Color(0xFF102619),
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(12),
                   border: Border.all(color: const Color(0xFF00F076)),
                 ),
-                child: const Row(
+                child: Column(
                   children: [
-                    Icon(Icons.check_circle, color: Color(0xFF00F076)),
-                    SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        "File successfully saved to your phone's Downloads folder!",
-                        style: TextStyle(color: Color(0xFF00F076), fontSize: 12, fontWeight: FontWeight.bold),
-                      ),
+                    const Row(
+                      children: [
+                        Icon(Icons.check_circle, color: Color(0xFF00F076)),
+                        SizedBox(width: 8),
+                        Text("Download Ready!", style: TextStyle(color: Color(0xFF00F076), fontWeight: FontWeight.bold)),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            icon: const Icon(Icons.play_arrow),
+                            label: const Text("▶ PLAY NOW"),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF00F076),
+                              foregroundColor: Colors.black,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                            ),
+                            onPressed: _openFile,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            icon: const Icon(Icons.share),
+                            label: const Text("📤 SHARE"),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF2A3345),
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                            ),
+                            onPressed: _shareFile,
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
