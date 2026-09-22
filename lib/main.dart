@@ -69,13 +69,13 @@ class _HomeScreenState extends State<HomeScreen> {
     if (url.isEmpty) return;
 
     try {
-      setState(() => _statusText = "Fetching video details...");
+      setState(() => _statusText = "Analyzing YouTube video...");
       var video = await _yt.videos.get(url);
       setState(() {
         _videoTitle = video.title;
         _statusText = "Channel: ${video.author} • ${video.duration?.inMinutes ?? 0} mins";
       });
-    } catch (_) {
+    } catch (e) {
       setState(() => _statusText = "Ready to download");
     }
   }
@@ -92,13 +92,21 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       _isDownloading = true;
       _progress = 0.0;
-      _statusText = "Connecting to high-speed stream...";
+      _statusText = "Connecting via high-speed client...";
       _savedFilePath = null;
     });
 
     try {
       var video = await _yt.videos.get(url);
-      var manifest = await _yt.videos.streamsClient.getManifest(url);
+      
+      // Bypass YouTube throttling using official AndroidVR and iOS client tokens
+      var manifest = await _yt.videos.streamsClient.getManifest(
+        url,
+        ytClients: [
+          YoutubeApiClient.androidVr,
+          YoutubeApiClient.ios,
+        ],
+      );
 
       StreamInfo streamInfo;
       String extension;
@@ -107,7 +115,6 @@ class _HomeScreenState extends State<HomeScreen> {
         streamInfo = manifest.audioOnly.withHighestBitrate();
         extension = "mp3";
       } else {
-        // Choose best matching video quality
         if (_selectedVideoQuality == "720p (HD)") {
           streamInfo = manifest.muxed.firstWhere(
             (s) => s.videoQualityLabel.contains('720'),
@@ -127,13 +134,13 @@ class _HomeScreenState extends State<HomeScreen> {
         extension = "mp4";
       }
 
-      // Safe saving directory (works on all Android 10, 11, 12, 13, 14)
+      // Safe cross-platform save path
       Directory? baseDir = await getExternalStorageDirectory();
       baseDir ??= await getApplicationDocumentsDirectory();
 
       String cleanTitle = video.title.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
-      if (cleanTitle.length > 40) {
-        cleanTitle = cleanTitle.substring(0, 40);
+      if (cleanTitle.length > 35) {
+        cleanTitle = cleanTitle.substring(0, 35);
       }
 
       File file = File('${baseDir.path}/$cleanTitle.$extension');
@@ -146,16 +153,18 @@ class _HomeScreenState extends State<HomeScreen> {
       await for (var chunk in stream) {
         fileStream.add(chunk);
         receivedBytes += chunk.length;
-        setState(() {
-          _progress = receivedBytes / totalBytes;
-          _statusText = "Downloading: ${(_progress * 100).toStringAsFixed(1)}%";
-        });
+        if (totalBytes > 0) {
+          setState(() {
+            _progress = receivedBytes / totalBytes;
+            _statusText = "Downloading: ${(_progress * 100).toStringAsFixed(1)}%";
+          });
+        }
       }
 
       await fileStream.flush();
       await fileStream.close();
 
-      // Also copy to public Downloads if permitted
+      // Try copying to standard public Downloads folder
       try {
         Directory publicDownloads = Directory('/storage/emulated/0/Download');
         if (await publicDownloads.exists()) {
@@ -166,7 +175,7 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         _isDownloading = false;
         _savedFilePath = file.path;
-        _statusText = "Download Complete!";
+        _statusText = "Done! Ready to play.";
       });
     } catch (e) {
       setState(() {
@@ -184,7 +193,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _shareFile() {
     if (_savedFilePath != null) {
-      Share.shareXFiles([XFile(_savedFilePath!)], text: "Downloaded with SoundRip Studio");
+      Share.shareXFiles([XFile(_savedFilePath!)], text: "Downloaded with SoundRip");
     }
   }
 
@@ -342,7 +351,7 @@ class _HomeScreenState extends State<HomeScreen> {
             const SizedBox(height: 20),
 
             if (_isDownloading) ...[
-              LinearProgressIndicator(value: _progress, color: const Color(0xFF00F076), backgroundColor: const Color(0xFF1D222D)),
+              LinearProgressIndicator(value: _progress > 0 ? _progress : null, color: const Color(0xFF00F076), backgroundColor: const Color(0xFF1D222D)),
               const SizedBox(height: 14),
             ],
 
@@ -360,7 +369,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
 
-            // Success Action Buttons (Play & Share)
+            // Success Card with PLAY and SHARE
             if (_savedFilePath != null) ...[
               const SizedBox(height: 20),
               Container(
@@ -376,7 +385,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       children: [
                         Icon(Icons.check_circle, color: Color(0xFF00F076)),
                         SizedBox(width: 8),
-                        Text("Download Ready!", style: TextStyle(color: Color(0xFF00F076), fontWeight: FontWeight.bold)),
+                        Text("Download Complete!", style: TextStyle(color: Color(0xFF00F076), fontWeight: FontWeight.bold)),
                       ],
                     ),
                     const SizedBox(height: 14),
