@@ -24,15 +24,16 @@ jobs:
         with:
           channel: 'stable'
 
-      - name: Initialize Android Project & Grant Permissions
+      - name: Initialize Android Project & Grant Full Permissions
         run: |
           flutter create --org com.soundrip --project-name soundrip .
           flutter pub add youtube_explode_dart
-          # Fix compileSdk version
+          # Fix compileSdk version to 35
           sed -i 's/compileSdk.*/compileSdk = 35/g' android/app/build.gradle* || true
           sed -i 's/compileSdkVersion.*/compileSdkVersion 35/g' android/app/build.gradle* || true
-          # Grant Android Internet & Network Permissions
-          sed -i '/<manifest/a \    <uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>' android/app/src/main/AndroidManifest.xml
+          # Add Internet and Public Storage Permissions
+          sed -i '/<manifest/a \    <uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>\n    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>\n    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/>' android/app/src/main/AndroidManifest.xml
+          sed -i 's/<application/<application android:requestLegacyExternalStorage="true"/g' android/app/src/main/AndroidManifest.xml
 
       - name: Build Release APK
         run: flutter build apk --release --no-tree-shake-icons
