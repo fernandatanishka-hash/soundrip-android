@@ -13,7 +13,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Build with Buildozer Action
+      - name: Build with Official Buildozer Container
         uses: ArtemSBulgakov/buildozer-action@v1.2.0
         id: buildozer
         with:
@@ -24,4 +24,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: SoundRip-Android-APK
-          path: ${{ steps.buildozer.outputs.filename }}
+          path: bin/*.apk
