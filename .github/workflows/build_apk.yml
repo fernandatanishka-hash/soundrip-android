@@ -24,13 +24,15 @@ jobs:
         with:
           channel: 'stable'
 
-      - name: Initialize Android Project
+      - name: Initialize Android Project & Grant Permissions
         run: |
           flutter create --org com.soundrip --project-name soundrip .
           flutter pub add youtube_explode_dart
-          # Fix compileSdk to 35 so all modern Android libraries compile cleanly
+          # Fix compileSdk version
           sed -i 's/compileSdk.*/compileSdk = 35/g' android/app/build.gradle* || true
           sed -i 's/compileSdkVersion.*/compileSdkVersion 35/g' android/app/build.gradle* || true
+          # Grant Android Internet & Network Permissions
+          sed -i '/<manifest/a \    <uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>' android/app/src/main/AndroidManifest.xml
 
       - name: Build Release APK
         run: flutter build apk --release --no-tree-shake-icons
