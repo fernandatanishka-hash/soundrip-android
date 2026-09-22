@@ -1,4 +1,4 @@
-name: Build Android APK
+name: Build Android APK (Flutter)
 
 on:
   push:
@@ -7,21 +7,33 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Build with Official Buildozer Container
-        uses: ArtemSBulgakov/buildozer-action@v1.2.0
-        id: buildozer
+      - name: Set up Java
+        uses: actions/setup-java@v4
         with:
-          workdir: .
-          buildozer_version: stable
+          distribution: 'zulu'
+          java-version: '17'
 
-      - name: Upload APK Artifact
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+
+      - name: Initialize Android Scaffolding & Dependencies
+        run: |
+          flutter create --org com.soundrip --project-name soundrip .
+          flutter pub add youtube_explode_dart permission_handler path_provider
+
+      - name: Build Release APK
+        run: flutter build apk --release --no-tree-shake-icons
+
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: SoundRip-Android-APK
-          path: bin/*.apk
+          name: SoundRip-Android-Release
+          path: build/app/outputs/flutter-apk/app-release.apk
