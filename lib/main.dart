@@ -2,7 +2,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
-import 'package:permission_handler/permission_handler.dart';
 
 void main() {
   runApp(const SoundRipApp());
@@ -79,8 +78,6 @@ class _HomeScreenState extends State<HomeScreen> {
       );
       return;
     }
-
-    await Permission.storage.request();
 
     setState(() {
       _isDownloading = true;
