@@ -24,10 +24,13 @@ jobs:
         with:
           channel: 'stable'
 
-      - name: Initialize Android Scaffolding & Dependencies
+      - name: Initialize Android Project
         run: |
           flutter create --org com.soundrip --project-name soundrip .
-          flutter pub add youtube_explode_dart permission_handler path_provider
+          flutter pub add youtube_explode_dart
+          # Fix compileSdk to 35 so all modern Android libraries compile cleanly
+          sed -i 's/compileSdk.*/compileSdk = 35/g' android/app/build.gradle* || true
+          sed -i 's/compileSdkVersion.*/compileSdkVersion 35/g' android/app/build.gradle* || true
 
       - name: Build Release APK
         run: flutter build apk --release --no-tree-shake-icons
