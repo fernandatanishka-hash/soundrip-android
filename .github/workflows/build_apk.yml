@@ -1,4 +1,4 @@
-name: Build Android APK
+name: Build Android APK (Flutter)
 
 on:
   push:
@@ -7,33 +7,33 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Set up Java
+        uses: actions/setup-java@v4
         with:
-          python-version: '3.10'
+          distribution: 'zulu'
+          java-version: '17'
 
-      - name: Install System Dependencies
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+
+      - name: Initialize Android Scaffolding & Dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y git zip unzip openjdk-17-jdk autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo5 cmake libffi-dev libssl-dev
+          flutter create --org com.soundrip --project-name soundrip .
+          flutter pub add youtube_explode_dart permission_handler path_provider
 
-      - name: Install Buildozer & Cython
-        run: |
-          pip install --upgrade pip
-          pip install Cython==0.29.36 buildozer
+      - name: Build Release APK
+        run: flutter build apk --release --no-tree-shake-icons
 
-      - name: Build APK with Buildozer
-        run: |
-          buildozer android debug
-
-      - name: Upload APK Artifact
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: SoundRip-Android-APK
-          path: bin/*.apk
+          name: SoundRip-Android-Release
+          path: build/app/outputs/flutter-apk/app-release.apk
