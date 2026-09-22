@@ -96,9 +96,9 @@ class _HomeScreenState extends State<HomeScreen> {
       // Request manifest with unblocked clients
       var manifest = await _yt.videos.streamsClient.getManifest(
         url,
-        ytClients: [
+               ytClients: [
           YoutubeApiClient.safari,
-          YoutubeApiClient.tvEmbedded,
+          YoutubeApiClient.androidVr,
         ],
       );
 
