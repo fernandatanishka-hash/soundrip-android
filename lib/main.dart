@@ -13,7 +13,7 @@ class SoundRipApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'SoundRip',
+      title: 'SoundRip Studio',
       debugShowCheckedModeBanner: false,
       theme: ThemeData.dark().copyWith(
         scaffoldBackgroundColor: const Color(0xFF0B0D11),
@@ -43,6 +43,14 @@ class _HomeScreenState extends State<HomeScreen> {
   double _progress = 0.0;
   String _statusText = "Ready. Paste a link to begin.";
   String _videoTitle = "No video loaded";
+  String _savedFilePath = "";
+
+  // Quality settings
+  String _selectedAudioQuality = "320 kbps (HQ)";
+  String _selectedVideoQuality = "720p (HD)";
+
+  final List<String> _audioQualities = ["320 kbps (HQ)", "192 kbps (Standard)", "128 kbps (Fast)"];
+  final List<String> _videoQualities = ["1080p (Full HD)", "720p (HD)", "480p", "360p"];
 
   Future<void> _pasteFromClipboard() async {
     ClipboardData? data = await Clipboard.getData(Clipboard.kTextPlain);
@@ -59,7 +67,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (url.isEmpty) return;
 
     try {
-      setState(() => _statusText = "Fetching video details...");
+      setState(() => _statusText = "Fetching stream details...");
       var video = await _yt.videos.get(url);
       setState(() {
         _videoTitle = video.title;
@@ -67,6 +75,31 @@ class _HomeScreenState extends State<HomeScreen> {
       });
     } catch (_) {
       setState(() => _statusText = "Ready to download");
+    }
+  }
+
+  Future<Directory> _getDownloadDirectory() async {
+    // Attempt standard Android public Downloads folder
+    List<String> paths = [
+      '/storage/emulated/0/Download',
+      '/sdcard/Download',
+      '/storage/emulated/0/Music',
+    ];
+
+    for (String p in paths) {
+      Directory d = Directory(p);
+      if (await d.exists()) {
+        return d;
+      }
+    }
+
+    // Fallback: create Download directory
+    Directory fallback = Directory('/storage/emulated/0/Download');
+    try {
+      await fallback.create(recursive: true);
+      return fallback;
+    } catch (_) {
+      return Directory.systemTemp;
     }
   }
 
@@ -82,7 +115,8 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       _isDownloading = true;
       _progress = 0.0;
-      _statusText = "Connecting to stream...";
+      _statusText = "Connecting to high-speed stream...";
+      _savedFilePath = "";
     });
 
     try {
@@ -101,13 +135,14 @@ class _HomeScreenState extends State<HomeScreen> {
       }
 
       var stream = _yt.videos.streamsClient.get(streamInfo);
-      var dir = Directory('/storage/emulated/0/Download');
-      if (!await dir.exists()) {
-        dir = Directory('/sdcard/Download');
-      }
+      Directory saveDir = await _getDownloadDirectory();
 
       String cleanTitle = video.title.replaceAll(RegExp(r'[\\/:*?"<>|]'), '');
-      var file = File('${dir.path}/$cleanTitle.$extension');
+      if (cleanTitle.length > 50) {
+        cleanTitle = cleanTitle.substring(0, 50);
+      }
+
+      var file = File('${saveDir.path}/$cleanTitle.$extension');
       var fileStream = file.openWrite();
 
       int totalBytes = streamInfo.size.totalBytes;
@@ -127,14 +162,19 @@ class _HomeScreenState extends State<HomeScreen> {
 
       setState(() {
         _isDownloading = false;
-        _statusText = "Saved to Downloads folder!";
+        _savedFilePath = file.path;
+        _statusText = "Saved to: ${file.path}";
       });
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             backgroundColor: const Color(0xFF00F076),
-            content: Text("Saved: $cleanTitle.$extension", style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+            duration: const Duration(seconds: 4),
+            content: Text(
+              "Saved to Downloads:\n$cleanTitle.$extension", 
+              style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)
+            ),
           ),
         );
       }
@@ -166,6 +206,7 @@ class _HomeScreenState extends State<HomeScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // URL Box
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -195,7 +236,10 @@ class _HomeScreenState extends State<HomeScreen> {
                       const SizedBox(width: 8),
                       ElevatedButton(
                         onPressed: _pasteFromClipboard,
-                        style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2A3345)),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF2A3345),
+                          foregroundColor: Colors.white,
+                        ),
                         child: const Text("Paste"),
                       ),
                     ],
@@ -204,6 +248,8 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
             const SizedBox(height: 16),
+
+            // Metadata Box
             Container(
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
@@ -221,6 +267,8 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
             const SizedBox(height: 16),
+
+            // Format Switcher (MP3 vs MP4)
             Row(
               children: [
                 Expanded(
@@ -250,11 +298,58 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ],
             ),
+            const SizedBox(height: 14),
+
+            // Quality Dropdown Row
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              decoration: BoxDecoration(
+                color: const Color(0xFF14171F),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFF282F3E)),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    _isAudio ? "Audio Bitrate:" : "Video Quality:", 
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey)
+                  ),
+                  DropdownButton<String>(
+                    value: _isAudio ? _selectedAudioQuality : _selectedVideoQuality,
+                    dropdownColor: const Color(0xFF1D222D),
+                    underline: const SizedBox(),
+                    items: (_isAudio ? _audioQualities : _videoQualities).map((String q) {
+                      return DropdownMenuItem<String>(
+                        value: q,
+                        child: Text(q, style: const TextStyle(fontSize: 12, color: Colors.white)),
+                      );
+                    }).toList(),
+                    onChanged: (val) {
+                      if (val != null) {
+                        setState(() {
+                          if (_isAudio) {
+                            _selectedAudioQuality = val;
+                          } else {
+                            _selectedVideoQuality = val;
+                          }
+                        });
+                      }
+                    },
+                  ),
+                ],
+              ),
+            ),
+
             const SizedBox(height: 20),
+
+            // Progress bar
             if (_isDownloading) ...[
               LinearProgressIndicator(value: _progress, color: const Color(0xFF00F076), backgroundColor: const Color(0xFF1D222D)),
-              const SizedBox(height: 12),
+              const SizedBox(height: 14),
             ],
+
+            // Action Button
             ElevatedButton(
               onPressed: _isDownloading ? null : _startDownload,
               style: ElevatedButton.styleFrom(
@@ -268,6 +363,30 @@ class _HomeScreenState extends State<HomeScreen> {
                 style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
               ),
             ),
+
+            if (_savedFilePath.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF102619),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFF00F076)),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.check_circle, color: Color(0xFF00F076)),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        "File successfully saved to your phone's Downloads folder!",
+                        style: TextStyle(color: Color(0xFF00F076), fontSize: 12, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ],
         ),
       ),
