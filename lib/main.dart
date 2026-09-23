@@ -1,4 +1,5 @@
-import 'dart:io';
+
+}import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
@@ -93,23 +94,30 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       var video = await _yt.videos.get(url);
 
-      // Request the manifest using YoutubeApiClient.ios + YoutubeApiClient.tv.
-      // These are the exact two clients youtube_explode_dart 3.1.0 itself
-      // uses by default when no ytClients override is given (ios first,
-      // falling back to tv on failure) -- see StreamClient.getManifest's
-      // own doc comment. The previous code overrode this with
-      // [safari, androidVr]: safari serves HLS (m3u8) streams that need a
-      // JS signature-challenge solver this app never configures (and can't
-      // easily run on Android), and forcing that pair meant the app lost
-      // the library's own built-in ios->tv fallback entirely. Both ios
-      // and tv are confirmed-existing YoutubeApiClient constants in the
-      // published 3.1.0 API and are documented as not requiring signature
-      // deciphering / being used specifically to bypass restrictions.
+      // Client selection, explained:
+      // - `tv` is deliberately NOT used. YouTube changed the JS
+      //   signature-challenge script the entire TVHTML5 client family
+      //   (`tv`, `tv_downgraded`, `tv_simply`) depends on. As of now this
+      //   is unresolved industry-wide -- even yt-dlp's actively maintained
+      //   JS-challenge solver cannot solve it yet (see yt-dlp/yt-dlp#17389).
+      //   Using `tv` here can only surface that exact failure
+      //   ("VideoUnplayableException ... The page needs to be reloaded"),
+      //   never fix it, so it's removed rather than relied on.
+      // - `ios` is kept: documented as not requiring signature deciphering
+      //   at all, so this specific breakage cannot affect it.
+      // - `androidVr` is added: a different, non-TVHTML5 client family, so
+      //   the same breakage doesn't apply. Covers MP4/muxed video now that
+      //   `tv` is gone.
+      // - `androidMusic` is added: also documented as not requiring
+      //   signature deciphering; strengthens the MP3/audio-only path.
+      // All three are confirmed-existing YoutubeApiClient constants in the
+      // published 3.1.0 API.
       var manifest = await _yt.videos.streamsClient.getManifest(
         url,
         ytClients: [
           YoutubeApiClient.ios,
-          YoutubeApiClient.tv,
+          YoutubeApiClient.androidVr,
+          YoutubeApiClient.androidMusic,
         ],
       );
 
@@ -174,16 +182,25 @@ class _HomeScreenState extends State<HomeScreen> {
       });
     } catch (e) {
       final msg = e.toString().toLowerCase();
+      final isReloadChallenge = msg.contains('reloaded');
       final isBotCheck = msg.contains('bot') || msg.contains('sign in');
       setState(() {
         _isDownloading = false;
-        _statusText = isBotCheck
-            ? "YouTube blocked this video with a bot-check. This is a "
-                "server-side restriction from YouTube (often tied to your "
-                "network), not a fixed app bug -- it can be temporary. "
-                "Try again shortly, on a different network, or with a "
-                "different video."
-            : "Error: $e";
+        if (isReloadChallenge) {
+          _statusText = "YouTube's current playback-verification challenge "
+              "couldn't be solved for this video on any available client. "
+              "This is a known, currently-unresolved YouTube-side issue "
+              "(not specific to this app) -- try a different video, or "
+              "try again later.";
+        } else if (isBotCheck) {
+          _statusText = "YouTube blocked this video with a bot-check. This "
+              "is a server-side restriction from YouTube (often tied to "
+              "your network), not a fixed app bug -- it can be temporary. "
+              "Try again shortly, on a different network, or with a "
+              "different video.";
+        } else {
+          _statusText = "Error: $e";
+        }
       });
     }
   }
