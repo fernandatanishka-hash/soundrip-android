@@ -101,8 +101,8 @@ class _HomeScreenState extends State<HomeScreen> {
       // [safari, androidVr]: safari serves HLS (m3u8) streams that need a
       // JS signature-challenge solver this app never configures (and can't
       // easily run on Android), and forcing that pair meant the app lost
-      // the library's own built-in ios->tv fallback entirely. Both `ios`
-      // and `tv` are confirmed-existing YoutubeApiClient constants in the
+      // the library's own built-in ios->tv fallback entirely. Both ios
+      // and tv are confirmed-existing YoutubeApiClient constants in the
       // published 3.1.0 API and are documented as not requiring signature
       // deciphering / being used specifically to bypass restrictions.
       var manifest = await _yt.videos.streamsClient.getManifest(
