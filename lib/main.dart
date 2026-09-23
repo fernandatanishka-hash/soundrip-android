@@ -1,363 +1,104 @@
-import 'dart:io';
-import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:youtube_explode_dart/youtube_explode_dart.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:open_filex/open_filex.dart';
-import 'package:share_plus/share_plus.dart';
 
-void main() {
-  runApp(const SoundRipApp());
-}
-
-class SoundRipApp extends StatelessWidget {
-  const SoundRipApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'SoundRip Studio',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData.dark().copyWith(
-        scaffoldBackgroundColor: const Color(0xFF0B0D11),
-        colorScheme: const ColorScheme.dark(
-          primary: Color(0xFF00F076),
-          secondary: Color(0xFF3B82F6),
-          surface: Color(0xFF14171F),
-        ),
-      ),
-      home: const HomeScreen(),
-    );
-  }
-}
-
-class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
-
-  @override
-  State<HomeScreen> createState() => _HomeScreenState();
-}
-
-class _HomeScreenState extends State<HomeScreen> {
-  final TextEditingController _urlController = TextEditingController();
-  final YoutubeExplode _yt = YoutubeExplode();
-  bool _isAudio = true;
-  bool _isDownloading = false;
-  double _progress = 0.0;
-  String _statusText = "Ready. Paste a YouTube link to begin.";
-  String _videoTitle = "No video loaded";
-  String? _savedFilePath;
-
-  Future<void> _pasteFromClipboard() async {
-    ClipboardData? data = await Clipboard.getData(Clipboard.kTextPlain);
-    if (data?.text != null) {
-      setState(() {
-        _urlController.text = data!.text!.trim();
-      });
-      _fetchVideoInfo();
-    }
-  }
-
-  Future<void> _fetchVideoInfo() async {
-    final url = _urlController.text.trim();
-    if (url.isEmpty) return;
-
-    try {
-      setState(() => _statusText = "Fetching video details...");
-      var video = await _yt.videos.get(url);
-      setState(() {
-        _videoTitle = video.title;
-        _statusText = "Channel: ${video.author} • ${video.duration?.inMinutes ?? 0} mins";
-      });
-    } catch (_) {
-      setState(() => _statusText = "Ready to download");
-    }
-  }
-
-  Future<void> _startDownload() async {
-    final url = _urlController.text.trim();
-    if (url.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Please enter a valid YouTube link")),
-      );
-      return;
-    }
-
-    setState(() {
-      _isDownloading = true;
-      _progress = 0.0;
-      _statusText = "Connecting to media stream...";
-      _savedFilePath = null;
-    });
-
-    try {
-      var video = await _yt.videos.get(url);
-      
-      // Request manifest with unblocked clients
-      var manifest = await _yt.videos.streamsClient.getManifest(
-        url,
-               ytClients: [
-          YoutubeApiClient.safari,
-          YoutubeApiClient.androidVr,
-        ],
-      );
-
-      StreamInfo streamInfo;
-      String extension;
-
-      if (_isAudio) {
-        // High quality audio stream
-        streamInfo = manifest.audioOnly.withHighestBitrate();
-        extension = "mp3";
-      } else {
-        // Muxed video (contains both video and audio without 403 errors)
-        if (manifest.muxed.isNotEmpty) {
-          streamInfo = manifest.muxed.withHighestBitrate();
-        } else {
-          streamInfo = manifest.videoOnly.withHighestBitrate();
-        }
-        extension = "mp4";
-      }
-
-      Directory? baseDir = await getExternalStorageDirectory();
-      baseDir ??= await getApplicationDocumentsDirectory();
-
-      String cleanTitle = video.title.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
-      if (cleanTitle.length > 30) {
-        cleanTitle = cleanTitle.substring(0, 30);
-      }
-
-      File file = File('${baseDir.path}/$cleanTitle.$extension');
-      var fileStream = file.openWrite();
-
-      var stream = _yt.videos.streamsClient.get(streamInfo);
-      int totalBytes = streamInfo.size.totalBytes;
-      int receivedBytes = 0;
-
-      await for (var chunk in stream) {
-        fileStream.add(chunk);
-        receivedBytes += chunk.length;
-        if (totalBytes > 0) {
-          setState(() {
-            _progress = receivedBytes / totalBytes;
-            _statusText = "Downloading: ${(_progress * 100).toStringAsFixed(1)}%";
-          });
-        }
-      }
-
-      await fileStream.flush();
-      await fileStream.close();
-
-      // Copy to public Downloads folder if accessible
-      try {
-        Directory publicDownloads = Directory('/storage/emulated/0/Download');
-        if (await publicDownloads.exists()) {
-          await file.copy('${publicDownloads.path}/$cleanTitle.$extension');
-        }
-      } catch (_) {}
-
-      setState(() {
-        _isDownloading = false;
-        _savedFilePath = file.path;
-        _statusText = "Download Complete!";
-      });
-    } catch (e) {
-      setState(() {
-        _isDownloading = false;
-        _statusText = "Error: $e";
-      });
-    }
-  }
-
-  void _openFile() {
-    if (_savedFilePath != null) {
-      OpenFilex.open(_savedFilePath!);
-    }
-  }
-
-  void _shareFile() {
-    if (_savedFilePath != null) {
-      Share.shareXFiles([XFile(_savedFilePath!)], text: "Downloaded with SoundRip");
-    }
-  }
-
-  @override
-  void dispose() {
-    _yt.close();
-    _urlController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('⚡ SOUNDRIP STUDIO', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF00F076))),
-        backgroundColor: const Color(0xFF14171F),
-        elevation: 0,
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: const Color(0xFF14171F),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFF282F3E)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text("SOURCE URL", style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey)),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _urlController,
-                          decoration: const InputDecoration(
-                            hintText: "Paste YouTube link...",
-                            filled: true,
-                            fillColor: Color(0xFF1D222D),
-                            border: InputBorder.none,
-                          ),
-                          onChanged: (val) => _fetchVideoInfo(),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      ElevatedButton(
-                        onPressed: _pasteFromClipboard,
-                        style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2A3345), foregroundColor: Colors.white),
-                        child: const Text("Paste"),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: const Color(0xFF10131A),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: const Color(0xFF1E2433)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(_videoTitle, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                  const SizedBox(height: 4),
-                  Text(_statusText, style: const TextStyle(fontSize: 11, color: Color(0xFF00F076))),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: ElevatedButton.icon(
-                    icon: const Icon(Icons.music_note),
-                    label: const Text("🎵 MP3 Audio"),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: _isAudio ? const Color(0xFF00F076) : const Color(0xFF1D222D),
-                      foregroundColor: _isAudio ? Colors.black : Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                    ),
-                    onPressed: () => setState(() => _isAudio = true),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: ElevatedButton.icon(
-                    icon: const Icon(Icons.videocam),
-                    label: const Text("🎬 MP4 Video"),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: !_isAudio ? const Color(0xFF3B82F6) : const Color(0xFF1D222D),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                    ),
-                    onPressed: () => setState(() => _isAudio = false),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 20),
-            if (_isDownloading) ...[
-              LinearProgressIndicator(value: _progress > 0 ? _progress : null, color: const Color(0xFF00F076), backgroundColor: const Color(0xFF1D222D)),
-              const SizedBox(height: 14),
-            ],
-            ElevatedButton(
-              onPressed: _isDownloading ? null : _startDownload,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF00F076),
-                foregroundColor: Colors.black,
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-              ),
-              child: Text(
-                _isDownloading ? "DOWNLOADING..." : "⚡ START INSTANT DOWNLOAD",
-                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
-              ),
-            ),
-            if (_savedFilePath != null) ...[
-              const SizedBox(height: 20),
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF102619),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: const Color(0xFF00F076)),
-                ),
-                child: Column(
-                  children: [
-                    const Row(
-                      children: [
-                        Icon(Icons.check_circle, color: Color(0xFF00F076)),
-                        SizedBox(width: 8),
-                        Text("Download Ready!", style: TextStyle(color: Color(0xFF00F076), fontWeight: FontWeight.bold)),
-                      ],
-                    ),
-                    const SizedBox(height: 14),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: ElevatedButton.icon(
-                            icon: const Icon(Icons.play_arrow),
-                            label: const Text("▶ PLAY NOW"),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF00F076),
-                              foregroundColor: Colors.black,
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                            ),
-                            onPressed: _openFile,
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: ElevatedButton.icon(
-                            icon: const Icon(Icons.share),
-                            label: const Text("📤 SHARE"),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF2A3345),
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                            ),
-                            onPressed: _shareFile,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-}
+--- orig/main.dart.orig	2026-09-23 01:14:47.435468339 +0000
++++ soundrip-android-main/lib/main.dart	2026-09-23 01:14:18.757101210 +0000
+@@ -38,6 +38,34 @@
+   State<HomeScreen> createState() => _HomeScreenState();
+ }
+ 
++/// Ordered groups of YouTube "internal client" personas to try when asking
++/// YouTube for a stream manifest.
++///
++/// Root cause of the `VideoUnplayableException` / "Sign in to confirm
++/// you're not a bot" failures this app was hitting: the previous code
++/// always requested `YoutubeApiClient.safari` + `YoutubeApiClient.androidVr`
++/// only. Neither of those is the client youtube_explode_dart's own
++/// maintainers currently recommend as the safe default -- `safari` needs a
++/// JavaScript signature-challenge solver (a Deno subprocess) that cannot
++/// run inside an Android APK, and when YouTube's anti-bot / PO-Token check
++/// flags a client (which it increasingly does for "safari"/"androidVr" on
++/// data-center-like or already-flagged IPs), the whole call throws instead
++/// of silently degrading.
++///
++/// `androidSdkless` is the client the library switched its own internal
++/// default to (see Hexer10/youtube_explode_dart PR #371): it is a copy of
++/// the Android client with the `androidSdkVersion` field removed, which is
++/// specifically the field that makes YouTube demand a PO Token. `ios` is
++/// documented as not requiring signature deciphering at all. Trying several
++/// independent groups in order means that if one "persona" is rate-limited
++/// or blocked for a particular video/IP, the app still has other, unrelated
++/// personas to fall back to instead of failing outright.
++const List<List<YoutubeApiClient>> _kClientFallbackGroups = [
++  [YoutubeApiClient.androidSdkless, YoutubeApiClient.ios],
++  [YoutubeApiClient.tv, YoutubeApiClient.androidVr],
++  [YoutubeApiClient.safari],
++];
++
+ class _HomeScreenState extends State<HomeScreen> {
+   final TextEditingController _urlController = TextEditingController();
+   final YoutubeExplode _yt = YoutubeExplode();
+@@ -74,6 +102,44 @@
+     }
+   }
+ 
++  /// Requests the stream manifest, trying each client group in
++  /// [_kClientFallbackGroups] in order until one succeeds.
++  ///
++  /// This is what makes extraction resilient instead of crashing outright:
++  /// previously a single blocked client aborted the whole download with a
++  /// raw [VideoUnplayableException]. Now a block on one client persona just
++  /// moves on to the next, independent one.
++  Future<StreamManifest> _getManifestWithFallback(String url) async {
++    Object? lastError;
++    for (final clients in _kClientFallbackGroups) {
++      try {
++        final manifest = await _yt.videos.streamsClient.getManifest(
++          url,
++          ytClients: clients,
++        );
++        if (manifest.streams.isNotEmpty) {
++          return manifest;
++        }
++      } catch (e) {
++        lastError = e;
++        // Try the next independent client group.
++        continue;
++      }
++    }
++    final isBotCheck = lastError != null &&
++        lastError.toString().toLowerCase().contains('bot');
++    throw Exception(
++      isBotCheck
++          ? 'YouTube blocked this download as a bot-check on every '
++              'available client. This is a server-side restriction from '
++              'YouTube (often tied to your network/IP), not an app bug -- '
++              'it can be temporary. Try again in a bit, on a different '
++              'network, or with a different video.'
++          : 'Could not fetch this video\'s streams from YouTube. '
++              '($lastError)',
++    );
++  }
++
+   Future<void> _startDownload() async {
+     final url = _urlController.text.trim();
+     if (url.isEmpty) {
+@@ -92,15 +158,10 @@
+ 
+     try {
+       var video = await _yt.videos.get(url);
+-      
+-      // Request manifest with unblocked clients
+-      var manifest = await _yt.videos.streamsClient.getManifest(
+-        url,
+-               ytClients: [
+-          YoutubeApiClient.safari,
+-          YoutubeApiClient.androidVr,
+-        ],
+-      );
++
++      // Request manifest, falling back across several independent YouTube
++      // client personas so a bot-check on one doesn't fail the whole thing.
++      var manifest = await _getManifestWithFallback(url);
+ 
+       StreamInfo streamInfo;
+       String extension;
+ 
